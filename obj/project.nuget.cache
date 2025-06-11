@@ -1,7 +1,7 @@
 {
   "version": 2,
-  "dgSpecHash": "7r0u74QAMgI=",
-  "success": false,
+  "dgSpecHash": "IU4qgYs84s4=",
+  "success": true,
   "projectFilePath": "C:\\Workspace\\account-service\\account-service.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\agand\\.nuget\\packages\\microsoft.aspnetcore.openapi\\8.0.16\\microsoft.aspnetcore.openapi.8.0.16.nupkg.sha512",
@@ -12,15 +12,5 @@
     "C:\\Users\\agand\\.nuget\\packages\\swashbuckle.aspnetcore.swaggergen\\6.6.2\\swashbuckle.aspnetcore.swaggergen.6.6.2.nupkg.sha512",
     "C:\\Users\\agand\\.nuget\\packages\\swashbuckle.aspnetcore.swaggerui\\6.6.2\\swashbuckle.aspnetcore.swaggerui.6.6.2.nupkg.sha512"
   ],
-  "logs": [
-    {
-      "code": "NU1108",
-      "level": "Error",
-      "message": "Cycle detected. \r\n  account-service -> account-service.",
-      "libraryId": "account-service",
-      "targetGraphs": [
-        "net8.0"
-      ]
-    }
-  ]
+  "logs": []
 }
