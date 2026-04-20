@@ -1,31 +1,22 @@
 using Microsoft.AspNetCore.Mvc;
 
-namespace account_service.Features.Accounts
+namespace account_service.Features.Accounts;
+
+[ApiController]
+[Route("api/[controller]")]
+public class AccountsController : ControllerBase
 {
-    [ApiController]
-    [Route("api/[controller]")]
-    public class AccountsController : ControllerBase
+    // GET: api/accounts
+    [HttpGet]
+    public ActionResult<Account[]> GetAccounts()
     {
-        public class Account
+        var accounts = new[]
         {
-            public int Id { get; set; }
-            public required string Name { get; set; }
-            public decimal Balance { get; set; }
-            public decimal Available { get; set; }
-        }
+            new Account { Id = 1, Name = "Savings", Balance = 1000.50m, Available = 1000.50m },
+            new Account { Id = 2, Name = "Checking", Balance = 500.25m, Available = 500.25m },
+            new Account { Id = 3, Name = "Investment", Balance = 12000.00m, Available = 12000.00m }
+        };
 
-        // GET: api/accounts
-        [HttpGet]
-        public ActionResult<Account[]> GetAccounts()
-        {
-            var accounts = new[]
-            {
-                new Account { Id = 1, Name = "Savings", Balance = 1000.50m, Available = 1000.50m },
-                new Account { Id = 2, Name = "Checking", Balance = 500.25m, Available = 500.25m },
-                new Account { Id = 3, Name = "Investment", Balance = 12000.00m, Available = 12000.00m }
-            };
-
-            return Ok(accounts);
-        }
+        return Ok(accounts);
     }
 }
