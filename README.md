@@ -1,11 +1,47 @@
 # account-service
 This is an account service API in C#
 
+## Project Structure
+
+```
+account-service/
+├── account-service.sln
+├── src/                                        # Main API project
+│   ├── account-service.csproj
+│   ├── Program.cs
+│   ├── appsettings.json
+│   ├── appsettings.Development.json
+│   ├── Features/
+│   │   └── Accounts/
+│   │       ├── Account.cs
+│   │       ├── AccountsController.cs
+│   │       ├── AccountService.cs
+│   │       ├── IAccountService.cs
+│   │       ├── AccountRepository.cs
+│   │       ├── IAccountRepository.cs
+│   │       └── Dtos/
+│   │           ├── AccountDto.cs
+│   │           ├── CreateAccountDto.cs
+│   │           └── UpdateAccountDto.cs
+│   ├── Infrastructure/
+│   │   └── Persistence/
+│   │       ├── AppDbContext.cs
+│   │       ├── AppDbContextFactory.cs
+│   │       └── ServiceCollectionExtensions.cs
+│   └── Migrations/
+└── test/
+    └── unittest/                               # xUnit unit tests
+        ├── unittest.csproj
+        └── Unit/
+            └── Accounts/
+                └── AccountServiceTests.cs
+```
+
 ## Upgrading to .NET 10
 
 Follow these steps to upgrade the project from .NET 9 to .NET 10:
 
-### 1. Update the Target Framework in `account-service.csproj`
+### 1. Update the Target Framework in `src/account-service.csproj`
 Change:
 ```xml
 <TargetFramework>net9.0</TargetFramework>
@@ -15,7 +51,7 @@ To:
 <TargetFramework>net10.0</TargetFramework>
 ```
 
-### 2. Update Package Versions in `account-service.csproj`
+### 2. Update Package Versions in `src/account-service.csproj`
 Bump all Microsoft packages from `9.0.x` to `10.0.x`:
 ```xml
 <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />
@@ -40,7 +76,7 @@ dotnet tool update --global dotnet-ef
 
 ## Entity Framework Core
 
-This project uses **EF Core** with **SQLite** by default. The database file (`accounts.db`) is created automatically in the project root.
+This project uses **EF Core** with **SQLite** by default. The database file (`accounts.db`) is created automatically in `src/`.
 
 ### Prerequisites — Install the EF Core CLI tool
 ```bash
@@ -52,27 +88,29 @@ dotnet ef --version
 ```
 
 ### Connection String
-Configured in `appsettings.json`:
+Configured in `src/appsettings.json`:
 ```json
 "ConnectionStrings": {
   "DefaultConnection": "Data Source=accounts.db"
 }
 ```
-To switch databases, update `ServiceCollectionExtensions.cs` with the appropriate provider and update the connection string here.
+To switch databases, update `src/Infrastructure/Persistence/ServiceCollectionExtensions.cs` with the appropriate provider and update the connection string here.
 
 ### Creating a Migration
-Run this after making any changes to your EF entity models:
+EF Core CLI commands must be run from the `src/` folder:
 ```bash
+cd src
 dotnet ef migrations add <MigrationName>
 ```
 Example:
 ```bash
 dotnet ef migrations add InitialCreate
 ```
-Migration files are generated in the `Migrations/` folder — **commit these to source control**.
+Migration files are generated in `src/Migrations/` — **commit these to source control**.
 
 ### Applying Migrations to the Database
 ```bash
+cd src
 dotnet ef database update
 ```
 This creates the database (if it doesn't exist) and applies all pending migrations.
@@ -104,12 +142,13 @@ dotnet ef database update 0
 dotnet ef migrations remove
 ```
 
-> ⚠️ **Never manually delete migration files** from the `Migrations/` folder — always use
+> ⚠️ **Never manually delete migration files** from `src/Migrations/` — always use
 > `dotnet ef migrations remove`. Manual deletion will cause the migration history to go out of sync
 > with `AppDbContextModelSnapshot.cs`, breaking future migrations.
 
 ### Listing Migrations
 ```bash
+cd src
 dotnet ef migrations list
 ```
 
@@ -142,8 +181,8 @@ dotnet ef database update
 You won't have a local copy of the old database to revert. In this case it's safe to start fresh:
 
 ```bash
-# 1. Delete the entire Migrations/ folder
-rm -rf Migrations/
+# 1. Delete the entire src/Migrations/ folder
+rm -rf src/Migrations/
 
 # 2. Swap the provider (see code changes below)
 
@@ -156,13 +195,13 @@ dotnet ef database update
 
 #### Code changes required when swapping providers
 
-**`account-service.csproj`** — replace the NuGet package:
+**`src/account-service.csproj`** — replace the NuGet package:
 | From | To |
 |---|---|
 | `Microsoft.EntityFrameworkCore.Sqlite` | `Npgsql.EntityFrameworkCore.PostgreSQL` (PostgreSQL) |
 | `Microsoft.EntityFrameworkCore.Sqlite` | `Microsoft.EntityFrameworkCore.SqlServer` (SQL Server) |
 
-**`Infrastructure/Persistence/ServiceCollectionExtensions.cs`** — swap the provider method:
+**`src/Infrastructure/Persistence/ServiceCollectionExtensions.cs`** — swap the provider method:
 ```csharp
 // PostgreSQL
 options.UseNpgsql(connectionString)
@@ -171,9 +210,9 @@ options.UseNpgsql(connectionString)
 options.UseSqlServer(connectionString)
 ```
 
-**`Infrastructure/Persistence/AppDbContextFactory.cs`** — apply the same swap as above.
+**`src/Infrastructure/Persistence/AppDbContextFactory.cs`** — apply the same swap as above.
 
-**`appsettings.json`** — update the connection string:
+**`src/appsettings.json`** — update the connection string:
 ```json
 // PostgreSQL
 "DefaultConnection": "Host=localhost;Database=accounts;Username=postgres;Password=secret"
