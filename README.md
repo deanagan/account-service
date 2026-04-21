@@ -30,12 +30,240 @@ account-service/
 │   │       └── ServiceCollectionExtensions.cs
 │   └── Migrations/
 └── test/
-    └── unittest/                               # xUnit unit tests
-        ├── unittest.csproj
-        └── Unit/
-            └── Accounts/
-                └── AccountServiceTests.cs
+    ├── unittest/                               # xUnit unit tests (NSubstitute mocks)
+    │   ├── unittest.csproj
+    │   └── Unit/
+    │       └── Accounts/
+    │           └── AccountServiceTests.cs
+    └── integrationtest/                        # xUnit integration tests (real HTTP + in-memory DB)
+        ├── integrationtest.csproj
+        ├── AccountsApiFactory.cs
+        └── Accounts/
+            └── AccountsControllerTests.cs
 ```
+
+---
+
+## Testing
+
+### Running All Tests
+```bash
+dotnet test account-service.sln
+```
+
+### Running a Specific Test Project
+```bash
+dotnet test test/unittest/unittest.csproj
+dotnet test test/integrationtest/integrationtest.csproj
+```
+
+---
+
+## Unit Tests
+
+Unit tests live in `test/unittest/` and use **xUnit v3** with **NSubstitute** for mocking.
+They test `AccountService` in complete isolation — no HTTP stack, no database, no EF Core.
+
+### Key packages
+| Package | Version | Purpose |
+|---|---|---|
+| `xunit.v3` | 1.1.0 | Test framework |
+| `xunit.runner.visualstudio` | 3.1.4 | IDE test runner |
+| `NSubstitute` | 5.3.0 | Mock `IAccountRepository` |
+
+### What is tested
+| Test | Scenario |
+|---|---|
+| `GetAllAccounts_ReturnsAllAccounts` | Repository returns list → service maps to DTOs |
+| `GetAllAccounts_ReturnsEmptyList` | Repository returns empty → service returns empty |
+| `GetAccountById_ReturnsAccount` | Repository finds account → service returns DTO |
+| `GetAccountById_ReturnsNull` | Repository returns null → service returns null |
+| `CreateAccount_ReturnsCreatedAccount` | DTO mapped to entity → saved → returned as DTO |
+| `CreateAccount_MapsAllFieldsFromDto` | All DTO fields correctly mapped to entity |
+| `UpdateAccount_ReturnsUpdatedAccount` | Existing account updated → returned as DTO |
+| `UpdateAccount_ReturnsNull_WhenNotFound` | Repository returns null → service returns null |
+| `DeleteAccount_CallsRepository` | Repository `DeleteAsync` called with correct ID |
+| `DeleteAccount_ReturnsFalse_WhenNotFound` | Repository returns false → service returns false |
+
+### Architecture
+
+```mermaid
+flowchart LR
+    subgraph UnitTest["🧪 Unit Test"]
+        T[AccountServiceTests]
+        M["NSubstitute Mock
+IAccountRepository"]
+    end
+
+    subgraph SUT["System Under Test"]
+        S[AccountService]
+    end
+
+    T -->|injects mock| S
+    T -->|verifies calls & returns| M
+    S -->|calls| M
+```
+
+---
+
+## Integration Tests
+
+Integration tests live in `test/integrationtest/` and use **xUnit v3** with
+`Microsoft.AspNetCore.Mvc.Testing`. They spin up the **full ASP.NET Core pipeline** in-process and
+send real HTTP requests — testing the entire stack from controller down to the database.
+
+### Key packages
+| Package | Version | Purpose |
+|---|---|---|
+| `xunit.v3` | 1.1.0 | Test framework |
+| `Microsoft.AspNetCore.Mvc.Testing` | 10.0.0 | In-process test server |
+| `Microsoft.EntityFrameworkCore.InMemory` | 10.0.0 | Replace SQLite with in-memory DB |
+
+### What is tested
+| Test | Scenario |
+|---|---|
+| `GetAccounts_ReturnsEmptyList` | GET /api/accounts with no data → 200 + `[]` |
+| `GetAccounts_ReturnsAllSeededAccounts` | GET /api/accounts after seeding → all accounts returned |
+| `GetAccountById_ReturnsAccount` | GET /api/accounts/{id} → 200 + correct account |
+| `GetAccountById_ReturnsNotFound` | GET /api/accounts/999 → 404 |
+| `CreateAccount_ReturnsCreatedAccount` | POST /api/accounts → 201 + Location header + body |
+| `CreateAccount_ReturnsBadRequest_WhenNameMissing` | POST with empty name → 400 |
+| `UpdateAccount_ReturnsUpdatedAccount` | PUT /api/accounts/{id} → 200 + updated body |
+| `UpdateAccount_ReturnsNotFound` | PUT /api/accounts/999 → 404 |
+| `DeleteAccount_ReturnsNoContent_WhenDeleted` | DELETE /api/accounts/{id} → 204 |
+| `DeleteAccount_ReturnsNotFound` | DELETE /api/accounts/999 → 404 |
+
+### How `WebApplicationFactory` works
+
+`WebApplicationFactory<Program>` boots the real ASP.NET Core application inside the test process
+using a `TestServer` — no external port is needed. It wires up the full middleware pipeline, DI
+container, and controller routing, so HTTP calls exercise every layer.
+
+```mermaid
+flowchart TD
+    subgraph TestProcess["Test Process"]
+        T[AccountsControllerTests]
+        C["HttpClient
+(from CreateClient)"]
+
+        subgraph Factory["AccountsApiFactory — WebApplicationFactory&lt;Program&gt;"]
+            P[Program.cs — full pipeline]
+            MW[Middleware: Routing / Auth]
+            CTR[AccountsController]
+            SVC[AccountService]
+            REPO[AccountRepository]
+            DB[(EF InMemory DB)]
+        end
+    end
+
+    T -->|creates| C
+    C -->|real HTTP request| MW
+    MW --> CTR
+    CTR --> SVC
+    SVC --> REPO
+    REPO --> DB
+    DB -->|result| REPO
+    REPO -->|result| SVC
+    SVC -->|result| CTR
+    CTR -->|HTTP response| C
+    C -->|asserts on response| T
+```
+
+### How SQLite is replaced with an in-memory database
+
+`AddPersistence` in `Program.cs` registers SQLite as the EF Core provider. `AccountsApiFactory`
+overrides `ConfigureWebHost` to remove those registrations and substitute the in-memory provider
+before the `TestServer` starts.
+
+#### Why simple descriptor removal isn't enough
+
+`AddDbContext` registers several internal service descriptors, including
+`IDbContextOptionsConfiguration<TContext>`, which carries the SQLite provider binding. Removing only
+`DbContextOptions<AppDbContext>` leaves that descriptor behind, causing EF to see **two providers
+registered** at runtime and throw:
+
+```
+System.InvalidOperationException: Services for database providers
+'Microsoft.EntityFrameworkCore.Sqlite', 'Microsoft.EntityFrameworkCore.InMemory'
+have been registered in the service provider.
+```
+
+The fix is to remove all EF-related descriptors by matching on known types and the
+`IDbContextOptionsConfiguration` namespace prefix:
+
+```csharp
+var descriptors = services
+    .Where(d => d.ServiceType == typeof(DbContextOptions<AppDbContext>)
+             || d.ServiceType == typeof(AppDbContext)
+             || (d.ServiceType.IsGenericType &&
+                 d.ServiceType.GetGenericTypeDefinition() == typeof(DbContextOptions<>))
+             || d.ServiceType.FullName?.StartsWith(
+                 "Microsoft.EntityFrameworkCore.Infrastructure.IDbContextOptionsConfiguration") == true)
+    .ToList();
+foreach (var d in descriptors) services.Remove(d);
+```
+
+```mermaid
+flowchart TD
+    subgraph Runtime["🚀 Normal Runtime"]
+        AP[AddPersistence] -->|registers| SD["SQLite DbContextOptions
++ IDbContextOptionsConfiguration"]
+        SD --> EF1[EF uses SQLite ✅]
+    end
+
+    subgraph Test["🧪 Integration Test"]
+        AP2[AddPersistence] -->|registers| SD2[SQLite descriptors]
+        FAC["AccountsApiFactory
+ConfigureWebHost"] -->|removes all SQLite descriptors| SD2
+        FAC -->|registers| IMD[InMemory DbContextOptions]
+        IMD --> EF2[EF uses InMemory ✅]
+    end
+```
+
+#### Why the database name must be a fixed field
+
+If `UseInMemoryDatabase` receives `Guid.NewGuid()` inside the lambda, the GUID is generated
+**on every DI scope resolution** — so the seed scope and the HTTP request scope get *different*
+in-memory databases, and seeded data is invisible to the requests under test.
+
+Capturing the name as a `readonly` field means it is evaluated once per factory instance, and every
+scope shares the same database:
+
+```csharp
+// ✅ Correct — name evaluated once per factory instance
+private readonly string _dbName = $"TestDb_{Guid.NewGuid()}";
+services.AddDbContext<AppDbContext>(o => o.UseInMemoryDatabase(_dbName));
+
+// ❌ Wrong — brand-new database on every scope resolution
+services.AddDbContext<AppDbContext>(o => o.UseInMemoryDatabase($"TestDb_{Guid.NewGuid()}"));
+```
+
+```mermaid
+sequenceDiagram
+    participant T as Test
+    participant F as AccountsApiFactory
+    participant S1 as Seed Scope
+    participant S2 as HttpClient Scope
+    participant DB as InMemory DB
+
+    Note over F: _dbName = "TestDb_abc123" (fixed at construction)
+
+    T->>F: EnsureDbCreated()
+    F->>S1: CreateScope()
+    S1->>DB: EnsureCreated() on "TestDb_abc123"
+
+    T->>F: SeedAsync(client)
+    F->>S1: CreateScope()
+    S1->>DB: INSERT into "TestDb_abc123"
+
+    T->>F: GET /api/accounts
+    F->>S2: HttpClient scope
+    S2->>DB: SELECT from "TestDb_abc123"
+    DB-->>S2: ✅ seeded rows returned
+    S2-->>T: 200 OK
+```
+
+---
 
 ## Upgrading to .NET 10
 
