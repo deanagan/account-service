@@ -15,10 +15,10 @@ public class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbContext>
             .Build();
 
         var connectionString = configuration.GetConnectionString("DefaultConnection")
-            ?? "Data Source=accounts.db";
+            ?? throw new InvalidOperationException("Connection string 'DefaultConnection' is not configured.");
 
         var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseSqlite(connectionString)
+            .UseNpgsql(connectionString)
             .Options;
 
         return new AppDbContext(options);

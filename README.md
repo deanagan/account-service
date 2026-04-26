@@ -44,6 +44,81 @@ account-service/
 
 ---
 
+## Quick Start
+
+### Prerequisites
+
+1. **.NET 10 SDK** — [Download here](https://dotnet.microsoft.com/download/dotnet/10.0)
+2. **PostgreSQL 16+** — See installation options below
+3. **EF Core CLI** — `dotnet tool install --global dotnet-ef`
+
+### PostgreSQL Installation
+
+Choose one of the following methods:
+
+#### Option A: Homebrew (macOS)
+```bash
+brew install postgresql@16
+brew services start postgresql@16
+
+# Create the database
+psql -U postgres -h localhost
+CREATE DATABASE accounts;
+\q
+```
+
+#### Option B: Docker (all platforms)
+```bash
+# Start PostgreSQL container
+docker run --name postgres-dev \
+  -e POSTGRES_PASSWORD=secret \
+  -p 5432:5432 \
+  -d postgres:16
+
+# Create the database
+docker exec -it postgres-dev psql -U postgres -c "CREATE DATABASE accounts;"
+```
+
+#### Option C: Download installer
+- **Windows/macOS/Linux**: [PostgreSQL Downloads](https://www.postgresql.org/download/)
+
+### Setup & Run
+
+```bash
+# 1. Clone and navigate to the project
+cd account-service/src
+
+# 2. Restore packages
+dotnet restore
+
+# 3. Update connection string in appsettings.json (if needed)
+# Default: Host=localhost;Port=5432;Database=accounts;Username=postgres;Password=secret
+
+# 4. Apply migrations
+dotnet ef database update
+
+# 5. Run the application
+dotnet run
+```
+
+The API will be available at:
+- **HTTP**: `http://localhost:5146`
+- **OpenAPI spec**: `http://localhost:5146/openapi/v1.json` (Dev only)
+
+### Run Tests
+```bash
+# All tests (unit + integration)
+dotnet test account-service.sln
+
+# Unit tests only
+dotnet test test/unittest/unittest.csproj
+
+# Integration tests only
+dotnet test test/integrationtest/integrationtest.csproj
+```
+
+---
+
 ## Testing
 
 ### Running All Tests
@@ -117,7 +192,7 @@ send real HTTP requests — testing the entire stack from controller down to the
 |---|---|---|
 | `xunit.v3` | 1.1.0 | Test framework |
 | `Microsoft.AspNetCore.Mvc.Testing` | 10.0.0 | In-process test server |
-| `Microsoft.EntityFrameworkCore.InMemory` | 10.0.0 | Replace SQLite with in-memory DB |
+| `Microsoft.EntityFrameworkCore.InMemory` | 10.0.0 | Replace PostgreSQL with in-memory DB |
 
 ### What is tested
 | Test | Scenario |
@@ -169,22 +244,22 @@ flowchart TD
     C -->|asserts on response| T
 ```
 
-### How SQLite is replaced with an in-memory database
+### How PostgreSQL is replaced with an in-memory database
 
-`AddPersistence` in `Program.cs` registers SQLite as the EF Core provider. `AccountsApiFactory`
+`AddPersistence` in `Program.cs` registers PostgreSQL as the EF Core provider. `AccountsApiFactory`
 overrides `ConfigureWebHost` to remove those registrations and substitute the in-memory provider
 before the `TestServer` starts.
 
 #### Why simple descriptor removal isn't enough
 
 `AddDbContext` registers several internal service descriptors, including
-`IDbContextOptionsConfiguration<TContext>`, which carries the SQLite provider binding. Removing only
+`IDbContextOptionsConfiguration<TContext>`, which carries the PostgreSQL provider binding. Removing only
 `DbContextOptions<AppDbContext>` leaves that descriptor behind, causing EF to see **two providers
 registered** at runtime and throw:
 
 ```
 System.InvalidOperationException: Services for database providers
-'Microsoft.EntityFrameworkCore.Sqlite', 'Microsoft.EntityFrameworkCore.InMemory'
+'Npgsql.EntityFrameworkCore.PostgreSQL', 'Microsoft.EntityFrameworkCore.InMemory'
 have been registered in the service provider.
 ```
 
@@ -206,15 +281,15 @@ foreach (var d in descriptors) services.Remove(d);
 ```mermaid
 flowchart TD
     subgraph Runtime["🚀 Normal Runtime"]
-        AP[AddPersistence] -->|registers| SD["SQLite DbContextOptions
+        AP[AddPersistence] -->|registers| SD["PostgreSQL DbContextOptions
 + IDbContextOptionsConfiguration"]
-        SD --> EF1[EF uses SQLite ✅]
+        SD --> EF1[EF uses PostgreSQL ✅]
     end
 
     subgraph Test["🧪 Integration Test"]
-        AP2[AddPersistence] -->|registers| SD2[SQLite descriptors]
+        AP2[AddPersistence] -->|registers| SD2[PostgreSQL descriptors]
         FAC["AccountsApiFactory
-ConfigureWebHost"] -->|removes all SQLite descriptors| SD2
+ConfigureWebHost"] -->|removes all PostgreSQL descriptors| SD2
         FAC -->|registers| IMD[InMemory DbContextOptions]
         IMD --> EF2[EF uses InMemory ✅]
     end
@@ -284,10 +359,9 @@ Bump all Microsoft packages from `9.0.x` to `10.0.x`:
 ```xml
 <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />
 <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.0" />
-<PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.0" />
+<PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0-*" />
 <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.0" />
 ```
-> Leave `Swashbuckle.AspNetCore` as-is until a .NET 10 compatible version is available.
 
 ### 3. Restore & Build
 ```bash
@@ -304,9 +378,11 @@ dotnet tool update --global dotnet-ef
 
 ## Entity Framework Core
 
-This project uses **EF Core** with **SQLite** by default. The database file (`accounts.db`) is created automatically in `src/`.
+This project uses **EF Core** with **PostgreSQL**. You'll need a running PostgreSQL server.
 
-### Prerequisites — Install the EF Core CLI tool
+### Prerequisites
+
+#### 1. Install the EF Core CLI tool
 ```bash
 dotnet tool install --global dotnet-ef
 ```
@@ -315,14 +391,38 @@ Verify it's installed:
 dotnet ef --version
 ```
 
+#### 2. Install and run PostgreSQL locally
+
+**macOS (Homebrew):**
+```bash
+brew install postgresql@16
+brew services start postgresql@16
+```
+
+**Docker (all platforms):**
+```bash
+docker run --name postgres-dev -e POSTGRES_PASSWORD=secret -p 5432:5432 -d postgres:16
+```
+
+**Create the database:**
+```bash
+# Using psql
+psql -U postgres -h localhost
+CREATE DATABASE accounts;
+\q
+
+# Or with Docker
+docker exec -it postgres-dev psql -U postgres -c "CREATE DATABASE accounts;"
+```
+
 ### Connection String
 Configured in `src/appsettings.json`:
 ```json
 "ConnectionStrings": {
-  "DefaultConnection": "Data Source=accounts.db"
+  "DefaultConnection": "Host=localhost;Port=5432;Database=accounts;Username=postgres;Password=secret"
 }
 ```
-To switch databases, update `src/Infrastructure/Persistence/ServiceCollectionExtensions.cs` with the appropriate provider and update the connection string here.
+Update this with your actual PostgreSQL credentials.
 
 ### Creating a Migration
 EF Core CLI commands must be run from the `src/` folder:
@@ -383,8 +483,8 @@ dotnet ef migrations list
 ### Switching to a Different Database Provider
 
 > ⚠️ Migrations are **provider-specific** — the generated SQL differs per database. For example,
-> a `decimal` column maps to `TEXT` in SQLite, `numeric(18,2)` in PostgreSQL, and `decimal(18,2)`
-> in SQL Server. You must regenerate migrations whenever you switch providers.
+> a `decimal` column maps to `numeric(18,2)` in PostgreSQL and `decimal(18,2)` in SQL Server.
+> You must regenerate migrations whenever you switch providers.
 
 #### Option A — You have access to the existing database (local dev)
 
@@ -424,14 +524,13 @@ dotnet ef database update
 #### Code changes required when swapping providers
 
 **`src/account-service.csproj`** — replace the NuGet package:
-| From | To |
+| From (current) | To |
 |---|---|
-| `Microsoft.EntityFrameworkCore.Sqlite` | `Npgsql.EntityFrameworkCore.PostgreSQL` (PostgreSQL) |
-| `Microsoft.EntityFrameworkCore.Sqlite` | `Microsoft.EntityFrameworkCore.SqlServer` (SQL Server) |
+| `Npgsql.EntityFrameworkCore.PostgreSQL` | `Microsoft.EntityFrameworkCore.SqlServer` (SQL Server) |
 
 **`src/Infrastructure/Persistence/ServiceCollectionExtensions.cs`** — swap the provider method:
 ```csharp
-// PostgreSQL
+// Current: PostgreSQL
 options.UseNpgsql(connectionString)
 
 // SQL Server
@@ -442,8 +541,8 @@ options.UseSqlServer(connectionString)
 
 **`src/appsettings.json`** — update the connection string:
 ```json
-// PostgreSQL
-"DefaultConnection": "Host=localhost;Database=accounts;Username=postgres;Password=secret"
+// Current: PostgreSQL
+"DefaultConnection": "Host=localhost;Port=5432;Database=accounts;Username=postgres;Password=secret"
 
 // SQL Server
 "DefaultConnection": "Server=localhost;Database=AccountsDb;User Id=sa;Password=secret"
@@ -521,7 +620,7 @@ sequenceDiagram
 flowchart TD
     subgraph Runtime["🚀 Runtime (ASP.NET Core)"]
         PC[Program.cs] -->|AddPersistence| SC[ServiceCollectionExtensions]
-        SC -->|UseSqlite + registers| CTX[AppDbContext]
+        SC -->|UseNpgsql + registers| CTX[AppDbContext]
     end
 
     subgraph DesignTime["🛠️ Design Time (dotnet ef CLI)"]
@@ -530,7 +629,7 @@ flowchart TD
         FAC -->|creates| CTX
     end
 
-    CTX --> DB[(accounts.db)]
+    CTX --> DB[(PostgreSQL)]
 ```
 
 The factory is **only used by the CLI** — it has no effect at runtime. It mirrors the same
